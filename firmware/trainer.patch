@@ -1,0 +1,85 @@
+diff --git a/app/midi_router.c b/app/midi_router.c
+index 5a375f4..e18713b 100644
+--- a/app/midi_router.c
++++ b/app/midi_router.c
+@@ -316,9 +316,11 @@ int groove_midi_clock_accept(unsigned source, uint8_t status)
+     }
+     return source == auto_source;
+ }
++int trainer_receive(unsigned source, const uint8_t *m, size_t n);
+ void fm1_app_midi_received(unsigned source, const uint8_t *m, size_t n)
+ {
+     if (source >= 3 || !m || !n || n > 3) return;
++    if (trainer_receive(source, m, n)) return;
+     unsigned clock = m[0] == 0xf8 || m[0] == 0xfa || m[0] == 0xfb || m[0] == 0xfc || m[0] == 0xf2;
+     if (clock && !groove_midi_clock_accept(source, m[0])) return;
+     (void)fm1_midi_post(m, n);
+diff --git a/app/screen.c b/app/screen.c
+index 811e5d1..37b9ab0 100644
+--- a/app/screen.c
++++ b/app/screen.c
+@@ -1337,21 +1337,11 @@ static __attribute__((noinline)) void edit_page_draw(unsigned visible)
+ }
+ static __attribute__((noinline, cold, minsize)) void boot_draw(void)
+ {
+-    if (cache->title_cache != 0) {
+-        cache->title_cache = 0;
+-        text(86, 48, "FM1", 4, TEXT, BACK);
+-        text(81, 98, "OFFICIAL OPEN", 1, ACCENT, BACK);
+-        text((240 - 12 * (sizeof FM1_RELEASE_VERSION - 1)) / 2, 120,
+-             FM1_RELEASE_VERSION, 2, TEXT, BACK);
+-        text(102, 208, "M-VAVE", 1, DIM, BACK);
+-    }
+-    if (cache->middle_cache == boot_phase) return;
+-    cache->middle_cache = boot_phase;
+-    static const uint8_t height[8] = {8, 18, 30, 42, 42, 30, 18, 8};
+-    for (unsigned i = 0; i < 8; ++i)
+-        paint_fill(58 + 16 * i, 166 - height[i] / 2, 12, height[i],
+-                   i < boot_phase ? colors[i] : PANEL);
++    if (cache->title_cache == 0) return;
++    cache->title_cache = 0;
++    text(40, 106, "VOCAL TRAINER", 2, ACCENT, BACK);
+ }
++#include "trainer.inc"
+ static void draw_page_body(const struct fm1_ble_status *ble)
+ {
+     unsigned visible = boot_active ? STARTUP : glo_down && glo_used ? MIX : page;
+@@ -1383,6 +1373,7 @@ static void draw_page_body(const struct fm1_ble_status *ble)
+         draw_ble(ble);
+         return;
+     }
++    if (visible == OVERVIEW) { trainer_draw(); return; }
+     header(v);
+     if (visible >= SOURCE) {
+         edit_page_draw(visible);
+@@ -1837,12 +1828,17 @@ void groove_screen_tap(uint32_t now)
+     notice = bpm < 0 ? "TAP: EXTERNAL MIDI CLOCK" : bpm ? "TAP TEMPO APPLIED" : "TAP AGAIN / HOME+SEQ";
+     notice_until = now + 1500U;
+ }
+-static int apply_controls(const struct fm1_controls *controls, uint32_t now,
++static int apply_controls(struct fm1_controls *controls, uint32_t now,
+                           const struct fm1_ble_status *ble)
+ {
+     uint32_t pressed = controls->buttons & ~previous_buttons;
+     uint32_t old_keys = previous_keys, key_down = controls->keys & ~old_keys;
+     unsigned play_handled = 0;
++    if (page == OVERVIEW && !glo_down && !(controls->buttons & ~BUTTON(PLAY)))
++        play_handled = trainer_controls(controls, pressed, now);
++    if (page != OVERVIEW || (pressed & ~BUTTON(PLAY)) || retry_reset)
++        trainer_stop();
++    trainer_tick(now);
+     previous_buttons = controls->buttons;
+     previous_keys = controls->keys;
+     blocked_keys &= controls->keys;
+diff --git a/app/version.h b/app/version.h
+index 7831201..37738a8 100644
+--- a/app/version.h
++++ b/app/version.h
+@@ -3,6 +3,6 @@
+ #define FM1_VERSION_H
+ 
+ #define FM1_RELEASE_VERSION "V14"
+-#define FM1_UPDATE_PRODUCT "FM-1_8000014"
++#define FM1_UPDATE_PRODUCT "FM-1_8642710"
+ 
+ #endif
